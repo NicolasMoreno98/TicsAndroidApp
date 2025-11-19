@@ -17,9 +17,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.Locale
-import com.example.tics.ui.theme.TICSTheme  // ← ¡IMPORTANTE! Agregar este import
+import com.example.tics.ui.theme.TICSTheme
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
 
 class MainActivity : ComponentActivity() {
+
+    companion object {
+        var gasAlert by mutableStateOf(false)
+        var smokeAlert by mutableStateOf(false)
+        var braceletConnected by mutableStateOf(true)
+        var distanceM by mutableStateOf(0.0)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -28,7 +39,6 @@ class MainActivity : ComponentActivity() {
         startService(Intent(this, MQTTService::class.java))
 
         setContent {
-            // USA EL NOMBRE CORRECTO: TICSTheme (sin "Theme." delante)
             TICSTheme {
                 Surface(
                     modifier = Modifier
@@ -41,15 +51,60 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private val uiUpdateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                MQTTService.ACTION_UPDATE_UI -> {
+                    val alarmSmoke = intent.getIntExtra(MQTTService.EXTRA_ALARM_SMOKE, -1)
+                    val braceletNear = intent.getIntExtra(MQTTService.EXTRA_BRACELET_NEAR, -1)
+                    val rssi = intent.getIntExtra(MQTTService.EXTRA_RSSI, -1)
+
+                    Log.d("APP", "📱 Recibiendo datos - Humo: $alarmSmoke, Pulsera: $braceletNear, RSSI: $rssi")
+                    if (alarmSmoke != -1) {
+                        smokeAlert = (alarmSmoke == 1)
+                        gasAlert = (alarmSmoke == 1) // Por ahora usamos el mismo valor
+                    }
+                    if (braceletNear != -1) {
+                        braceletConnected = (braceletNear == 1)
+                    }
+                    if (rssi != -1) {
+                        distanceM = convertRssiToMeters(rssi)
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val filter = IntentFilter(MQTTService.ACTION_UPDATE_UI)
+        registerReceiver(uiUpdateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        unregisterReceiver(uiUpdateReceiver)
+    }
+
+    private fun convertRssiToMeters(rssi: Int): Double {
+        return when {
+            rssi >= -50 -> 1.0
+            rssi >= -60 -> 3.0
+            rssi >= -70 -> 7.0
+            rssi >= -80 -> 15.0
+            else -> 30.0
+        }
+    }
 }
 
 @Composable
 fun StatusScreen() {
-    // Estados ORIGINALES pero conectados a MQTT después
-    var gasAlert by remember { mutableStateOf(false) }    // false = normal
-    var smokeAlert by remember { mutableStateOf(false) }  // false = normal
-    var braceletConnected by remember { mutableStateOf(true) } // true = conectada
-    var distanceM by remember { mutableDoubleStateOf(0.0) }     // 0 = esperando datos
+    // === CAMBIAR ESTO ===
+    // Usar las variables globales en lugar de valores por defecto
+    val gasAlert = MainActivity.gasAlert
+    val smokeAlert = MainActivity.smokeAlert
+    val braceletConnected = MainActivity.braceletConnected
+    val distanceM = MainActivity.distanceM
 
     Box(
         modifier = Modifier
