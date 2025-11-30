@@ -1,10 +1,14 @@
 package com.example.tics
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -16,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import java.util.Locale
 import com.example.tics.ui.theme.TICSTheme
 import android.content.BroadcastReceiver
@@ -31,19 +36,58 @@ class MainActivity : ComponentActivity() {
         var distanceM by mutableStateOf(0.0)
     }
 
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            Log.d("APP", "Permiso de notificaciones CONCEDIDO")
+        } else {
+            Log.d("APP", "Permiso de notificaciones DENEGADO")
+        }
+    }
+
+    private val uiUpdateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == MQTTService.ACTION_UPDATE_UI) {
+                val alarmSmoke = intent.getIntExtra(MQTTService.EXTRA_ALARM_SMOKE, -1)
+                val braceletNear = intent.getIntExtra(MQTTService.EXTRA_BRACELET_NEAR, -1)
+                val rssi = intent.getIntExtra(MQTTService.EXTRA_RSSI, -1)
+
+                Log.d("APP", "📱 Recibiendo datos - Humo: $alarmSmoke, Pulsera: $braceletNear, RSSI: $rssi")
+
+                if (alarmSmoke != -1) {
+                    smokeAlert = alarmSmoke == 1
+                    gasAlert = alarmSmoke == 1 // Mismo valor por ahora
+                }
+
+                if (braceletNear != -1) {
+                    braceletConnected = braceletNear == 1
+                }
+
+                if (rssi != -1) {
+                    distanceM = convertRssiToMeters(rssi)
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // INICIAR MQTT
-        Log.d("APP", "Iniciando servicio MQTT...")
-        startService(Intent(this, MQTTService::class.java))
+        // Solicitar permiso de notificaciones en Android 13+
+        askNotificationPermission()
+
+        // Iniciar servicio MQTT en primer plano
+        startMqttService()
+
+        // Registrar BroadcastReceiver para actualizaciones de la UI
+        val filter = IntentFilter(MQTTService.ACTION_UPDATE_UI)
+        ContextCompat.registerReceiver(this, uiUpdateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
 
         setContent {
             TICSTheme {
                 Surface(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color(0xFF575757)),
+                    modifier = Modifier.fillMaxSize(),
                     color = Color(0xFF575757)
                 ) {
                     StatusScreen()
@@ -51,38 +95,28 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    private val uiUpdateReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            when (intent.action) {
-                MQTTService.ACTION_UPDATE_UI -> {
-                    val alarmSmoke = intent.getIntExtra(MQTTService.EXTRA_ALARM_SMOKE, -1)
-                    val braceletNear = intent.getIntExtra(MQTTService.EXTRA_BRACELET_NEAR, -1)
-                    val rssi = intent.getIntExtra(MQTTService.EXTRA_RSSI, -1)
 
-                    Log.d("APP", "📱 Recibiendo datos - Humo: $alarmSmoke, Pulsera: $braceletNear, RSSI: $rssi")
-                    if (alarmSmoke != -1) {
-                        smokeAlert = (alarmSmoke == 1)
-                        gasAlert = (alarmSmoke == 1) // Por ahora usamos el mismo valor
-                    }
-                    if (braceletNear != -1) {
-                        braceletConnected = (braceletNear == 1)
-                    }
-                    if (rssi != -1) {
-                        distanceM = convertRssiToMeters(rssi)
-                    }
-                }
+    private fun startMqttService() {
+        val intent = Intent(this, MQTTService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        Log.d("APP", "Iniciando servicio MQTT...")
+    }
+
+    private fun askNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED) {
+                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        val filter = IntentFilter(MQTTService.ACTION_UPDATE_UI)
-        registerReceiver(uiUpdateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-    }
-
-    override fun onPause() {
-        super.onPause()
+    override fun onDestroy() {
+        super.onDestroy()
         unregisterReceiver(uiUpdateReceiver)
     }
 
@@ -99,8 +133,6 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun StatusScreen() {
-    // === CAMBIAR ESTO ===
-    // Usar las variables globales en lugar de valores por defecto
     val gasAlert = MainActivity.gasAlert
     val smokeAlert = MainActivity.smokeAlert
     val braceletConnected = MainActivity.braceletConnected
@@ -138,9 +170,6 @@ fun StatusScreen() {
 @Composable
 fun AlertCard(title: String, alert: Boolean) {
     Card(
-        onClick = {
-            // Tu código original de notificaciones
-        },
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
@@ -168,9 +197,6 @@ fun AlertCard(title: String, alert: Boolean) {
 @Composable
 fun BraceletCard(connected: Boolean, distanceMeters: Double) {
     Card(
-        onClick = {
-            // Tu código original de notificaciones
-        },
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
