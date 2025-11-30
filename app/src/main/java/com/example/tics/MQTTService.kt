@@ -62,8 +62,6 @@ class MQTTService : Service() {
     }
 
     private fun subscribeToTopics() {
-        // We only subscribe to topics that provide raw data.
-        // `braceletNear` is now calculated locally.
         val topics = arrayOf(
             "tics/grupo1/esp32/tele/alarmSmoke",
             "tics/grupo1/esp32/tele/rssi"
@@ -81,7 +79,6 @@ class MQTTService : Service() {
                 when (topic) {
                     "tics/grupo1/esp32/tele/alarmSmoke" -> {
                         val alarmValue = payload.toIntOrNull() ?: 0
-                        // Notify only when changing to alert state
                         if (alarmValue == 1 && lastAlarmSmoke != 1) {
                             NotificationUtils.notify(this@MQTTService, "¡Alerta de Humo!", "Se ha detectado humo o gas en el ambiente.", 2)
                             Log.d("MQTT", "▲ ¡ALERTA CRÍTICA! Humo o gas detectado")
@@ -92,11 +89,8 @@ class MQTTService : Service() {
                         val rssiValue = payload.toIntOrNull() ?: -1
                         lastRssi = rssiValue
 
-                        // --- LOCAL BRACELET LOGIC ---
-                        // Determine status based on RSSI threshold
                         val newBraceletStatus = if (rssiValue > RSSI_THRESHOLD) 1 else 0
 
-                        // Notify only when changing to disconnected state (1 -> 0)
                         if (newBraceletStatus == 0 && lastBraceletNear != 0) {
                             NotificationUtils.notify(this@MQTTService, "¡Alerta de Pulsera!", "Se ha perdido la conexión con la pulsera.", 3)
                             Log.d("MQTT", "▲ ¡PULSERA DESCONECTADA! Persona alejada (RSSI: $rssiValue)")
@@ -104,8 +98,6 @@ class MQTTService : Service() {
                         lastBraceletNear = newBraceletStatus
                     }
                 }
-
-                // After any message, send a complete update to the UI
                 sendUpdateToUI(lastAlarmSmoke, lastBraceletNear, lastRssi)
             }
 
@@ -113,12 +105,15 @@ class MQTTService : Service() {
         })
 
         topics.forEach { topic ->
-            mqttClient?.subscribe(topic, 0) // Subscribe with QoS 0
+            mqttClient?.subscribe(topic, 0)
         }
     }
 
     private fun sendUpdateToUI(alarmSmoke: Int, braceletNear: Int, rssi: Int) {
         val intent = Intent(ACTION_UPDATE_UI).apply {
+            // This is the FIX: Make the broadcast explicit by targeting our app's package
+            setPackage(packageName)
+
             putExtra(EXTRA_ALARM_SMOKE, alarmSmoke)
             putExtra(EXTRA_BRACELET_NEAR, braceletNear)
             putExtra(EXTRA_RSSI, rssi)

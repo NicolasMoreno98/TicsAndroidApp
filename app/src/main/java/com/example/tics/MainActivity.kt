@@ -1,7 +1,10 @@
 package com.example.tics
 
 import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -21,20 +24,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import java.util.Locale
 import com.example.tics.ui.theme.TICSTheme
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.IntentFilter
+import java.util.Locale
+import kotlin.math.pow
 
 class MainActivity : ComponentActivity() {
 
-    companion object {
-        var gasAlert by mutableStateOf(false)
-        var smokeAlert by mutableStateOf(false)
-        var braceletConnected by mutableStateOf(true)
-        var distanceM by mutableStateOf(0.0)
-    }
+    // State is now held by the Activity instance, not a companion object.
+    private var gasAlert by mutableStateOf(false)
+    private var smokeAlert by mutableStateOf(false)
+    private var braceletConnected by mutableStateOf(true)
+    private var distanceM by mutableStateOf(0.0)
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -64,9 +64,9 @@ class MainActivity : ComponentActivity() {
                     braceletConnected = braceletNear == 1
                 }
 
-                if (rssi != -1) {
-                    distanceM = convertRssiToMeters(rssi)
-                }
+                // We still want to calculate the distance even if rssi is -1 initially
+                // The conversion function will handle the invalid value.
+                distanceM = convertRssiToMeters(rssi)
             }
         }
     }
@@ -74,15 +74,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Solicitar permiso de notificaciones en Android 13+
         askNotificationPermission()
 
-        // Iniciar servicio MQTT en primer plano
-        startMqttService()
-
-        // Registrar BroadcastReceiver para actualizaciones de la UI
+        // FIX: Register the receiver BEFORE starting the service to avoid race conditions.
         val filter = IntentFilter(MQTTService.ACTION_UPDATE_UI)
         ContextCompat.registerReceiver(this, uiUpdateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+
+        startMqttService()
 
         setContent {
             TICSTheme {
@@ -90,7 +88,12 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = Color(0xFF575757)
                 ) {
-                    StatusScreen()
+                    StatusScreen(
+                        gasAlert = gasAlert,
+                        smokeAlert = smokeAlert,
+                        braceletConnected = braceletConnected,
+                        distanceM = distanceM
+                    )
                 }
             }
         }
@@ -121,23 +124,24 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun convertRssiToMeters(rssi: Int): Double {
-        return when {
-            rssi >= -50 -> 1.0
-            rssi >= -60 -> 3.0
-            rssi >= -70 -> 7.0
-            rssi >= -80 -> 15.0
-            else -> 30.0
-        }
+        // RSSI values are negative. A value of -1 indicates no data yet.
+        // A value of 0 or positive is an error or at point-blank range.
+        if (rssi >= -1) return 0.0
+
+        val txPower = -59 // Assumed signal strength at 1 meter (in dBm).
+        val n = 2.0       // Environmental factor.
+
+        return 10.0.pow((txPower - rssi) / (10 * n))
     }
 }
 
 @Composable
-fun StatusScreen() {
-    val gasAlert = MainActivity.gasAlert
-    val smokeAlert = MainActivity.smokeAlert
-    val braceletConnected = MainActivity.braceletConnected
-    val distanceM = MainActivity.distanceM
-
+fun StatusScreen(
+    gasAlert: Boolean,
+    smokeAlert: Boolean,
+    braceletConnected: Boolean,
+    distanceM: Double
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -244,8 +248,16 @@ fun BraceletCard(connected: Boolean, distanceMeters: Double) {
                     fontSize = 14.sp,
                     color = Color(0xFFBDBDBD)
                 )
+
+                // If distance is effectively 0, it means no valid RSSI has been received yet.
+                val distanceText = if (distanceMeters > 0.01) {
+                    String.format(Locale.US, "%.2f m", distanceMeters)
+                } else {
+                    "N/A"
+                }
+
                 Text(
-                    String.format(Locale.US, "%.2f m", distanceMeters),
+                    text = distanceText,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
