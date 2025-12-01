@@ -128,8 +128,8 @@ class MainActivity : ComponentActivity() {
         // A value of 0 or positive is an error or at point-blank range.
         if (rssi >= -1) return 0.0
 
-        val txPower = -52 // Assumed signal strength at 1 meter (in dBm).
-        val n = 5.65       // Environmental factor.
+        val txPower = -74 // Assumed signal strength at 1 meter (in dBm).
+        val n = 2.60       // Environmental factor.
 
         return 10.0.pow((txPower - rssi) / (10 * n))
     }
