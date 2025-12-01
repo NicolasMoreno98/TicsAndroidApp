@@ -128,8 +128,8 @@ class MainActivity : ComponentActivity() {
         // A value of 0 or positive is an error or at point-blank range.
         if (rssi >= -1) return 0.0
 
-        val txPower = -59 // Assumed signal strength at 1 meter (in dBm).
-        val n = 2.0       // Environmental factor.
+        val txPower = -52 // Assumed signal strength at 1 meter (in dBm).
+        val n = 5.65       // Environmental factor.
 
         return 10.0.pow((txPower - rssi) / (10 * n))
     }
@@ -228,11 +228,27 @@ fun BraceletCard(connected: Boolean, distanceMeters: Double) {
                         color = Color(0xFFBDBDBD)
                     )
                 }
+
+                val isNa = distanceMeters <= 0.01
+                val statusText: String
+                val statusColor: Color
+
+                if (isNa) {
+                    statusText = "DESCONECTADA"
+                    statusColor = MaterialTheme.colorScheme.error
+                } else if (connected) {
+                    statusText = "CONECTADA"
+                    statusColor = MaterialTheme.colorScheme.primary
+                } else {
+                    statusText = "FUERA DE ZONA SEGURA"
+                    statusColor = MaterialTheme.colorScheme.error
+                }
+
                 Text(
-                    if (connected) "CONECTADA" else "DESCONECTADA",
+                    text = statusText,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                    color = statusColor
                 )
             }
 

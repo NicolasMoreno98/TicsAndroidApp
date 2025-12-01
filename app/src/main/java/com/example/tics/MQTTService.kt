@@ -22,7 +22,7 @@ class MQTTService : Service() {
         const val EXTRA_BRACELET_NEAR = "bracelet_near"
         const val EXTRA_RSSI = "rssi"
         private const val NOTIFICATION_ID = 1
-        private const val RSSI_THRESHOLD = -60 // As requested: alert if RSSI is -60 or lower
+        private const val RSSI_THRESHOLD = -165 // As requested: alert if RSSI is -165 or lower
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
